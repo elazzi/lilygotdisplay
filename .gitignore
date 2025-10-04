@@ -1,0 +1,22 @@
+# PyInstaller
+/desktop_app/build/
+/desktop_app/dist/
+/desktop_app/*.spec
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+env/
+pip-cache/
+.env
+
+# OS-generated files
+.DS_Store
+Thumbs.db
