@@ -4,8 +4,8 @@
 #include <CST816S.h>
 #include <USB.h>
 #include <USBHIDKeyboard.h>
-#include <Crypto.h>
-#include <AES.h>
+#include "tusb.h"
+#include "mbedtls/aes.h"
 #include <nvs_flash.h>
 #include <nvs.h>
 
@@ -219,24 +219,24 @@ void handleTouch() {
             int row = (i - 1) / 3;
             int x = startX + col * (buttonWidth + spacingX);
             int y = startY + row * (buttonHeight + spacingY);
-            if (touch.x > x && touch.x < x + buttonWidth && touch.y > y && touch.y < y + buttonHeight) {
+            if (touch.data.x > x && touch.data.x < x + buttonWidth && touch.data.y > y && touch.data.y < y + buttonHeight) {
                 if (enteredPin.length() < pinLength) enteredPin += String(i);
             }
         }
 
         int y_row4 = startY + 3 * (buttonHeight + spacingY);
         // Clear button
-        if (touch.x > startX && touch.x < startX + buttonWidth && touch.y > y_row4 && touch.y < y_row4 + buttonHeight) {
+        if (touch.data.x > startX && touch.data.x < startX + buttonWidth && touch.data.y > y_row4 && touch.data.y < y_row4 + buttonHeight) {
             enteredPin = "";
         }
         // 0 button
         int x_zero = startX + buttonWidth + spacingX;
-        if (touch.x > x_zero && touch.x < x_zero + buttonWidth && touch.y > y_row4 && touch.y < y_row4 + buttonHeight) {
+        if (touch.data.x > x_zero && touch.data.x < x_zero + buttonWidth && touch.data.y > y_row4 && touch.data.y < y_row4 + buttonHeight) {
             if (enteredPin.length() < pinLength) enteredPin += "0";
         }
         // Enter button
         int x_ok = startX + 2 * (buttonWidth + spacingX);
-        if (touch.x > x_ok && touch.x < x_ok + buttonWidth && touch.y > y_row4 && touch.y < y_row4 + buttonHeight) {
+        if (touch.data.x > x_ok && touch.data.x < x_ok + buttonWidth && touch.data.y > y_row4 && touch.data.y < y_row4 + buttonHeight) {
             if (currentState == PIN_SETUP) {
                 setupPin();
             } else {
@@ -341,7 +341,7 @@ void checkPin() {
 }
 
 void typePassword() {
-    if (keyboard.isConnected()) {
+    if (tud_ready()) {
         nvs_handle_t my_handle;
         esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &my_handle);
         if (err != ESP_OK) {
@@ -370,37 +370,45 @@ void typePassword() {
 }
 
 void encrypt(const String& plainText, byte* output, byte* iv) {
-    AES aes;
-    aes.setKey(aes_key, sizeof(aes_key));
+    mbedtls_aes_context aes;
+    mbedtls_aes_init(&aes);
 
     // Generate a random IV
     for(int i=0; i<16; i++) {
         iv[i] = random(256);
     }
-    aes.setIV(iv);
 
     // PKCS7 padding
     int plainTextLen = plainText.length();
     int paddedLen = plainTextLen + (16 - (plainTextLen % 16));
     byte paddedText[paddedLen];
     memcpy(paddedText, plainText.c_str(), plainTextLen);
+    byte padValue = 16 - (plainTextLen % 16);
     for (int i = plainTextLen; i < paddedLen; i++) {
-        paddedText[i] = 16 - (plainTextLen % 16);
+        paddedText[i] = padValue;
     }
 
-    aes.encrypt(paddedText, output, paddedLen);
+    mbedtls_aes_setkey_enc(&aes, aes_key, 128);
+    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, paddedLen, iv, paddedText, output);
+    mbedtls_aes_free(&aes);
 }
 
 String decrypt(byte* cipherText, size_t len, byte* iv) {
-    AES aes;
-    aes.setKey(aes_key, sizeof(aes_key));
-    aes.setIV(iv);
+    mbedtls_aes_context aes;
+    mbedtls_aes_init(&aes);
 
     byte decrypted[len];
-    aes.decrypt(cipherText, decrypted, len);
+
+    mbedtls_aes_setkey_dec(&aes, aes_key, 128);
+    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, len, iv, cipherText, decrypted);
+    mbedtls_aes_free(&aes);
 
     // Remove PKCS7 padding
     char pad = decrypted[len - 1];
+    if (pad > 16 || pad == 0) {
+        // Invalid padding
+        return "";
+    }
     int plainTextLen = len - pad;
 
     char plainText[plainTextLen + 1];
