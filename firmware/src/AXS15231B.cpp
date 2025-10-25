@@ -29,7 +29,7 @@ static spi_device_handle_t spi;
 static void WriteComm(uint8_t data)
 {
     TFT_CS_L;
-    SPI.beginTransaction(SPISettings(AXS_SPI_FREQUENCY, MSBFIRST, TFT_SPI_MODE));
+    SPI.beginTransaction(SPISettings(SPI_FREQUENCY, MSBFIRST, TFT_SPI_MODE));
     SPI.write(0x00);
     SPI.write(data);
     SPI.write(0x00);
@@ -43,7 +43,7 @@ static void WriteComm(uint8_t data)
 static void WriteData(uint8_t data)
 {
     TFT_CS_L;
-    SPI.beginTransaction(SPISettings(AXS_SPI_FREQUENCY, MSBFIRST, TFT_SPI_MODE));
+    SPI.beginTransaction(SPISettings(SPI_FREQUENCY, MSBFIRST, TFT_SPI_MODE));
     SPI.write(data);
     SPI.endTransaction();
     TFT_CS_H;
@@ -157,7 +157,7 @@ void axs15231_init(void)
         .command_bits = 8,
         .address_bits = 24,
         .mode = TFT_SPI_MODE,
-    .clock_speed_hz = AXS_SPI_FREQUENCY,
+        .clock_speed_hz = SPI_FREQUENCY,
         .spics_io_num = -1,
         // .spics_io_num = TFT_QSPI_CS,
         .flags = SPI_DEVICE_HALFDUPLEX,
@@ -560,3 +560,4 @@ void hw_clear_screen_black()
 {
     lcd_send_cmd(0x22, NULL, 0);
 }
+

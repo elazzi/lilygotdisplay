@@ -1,346 +1,440 @@
-// Adapted main.cpp based on nikthefix TRulerNick example
 #include "AXS15231B.h"
 #include <TFT_eSPI.h>
 #include <Wire.h>
-#include "fontM.h"
-#include "fontH.h"
-#include "fontS.h"
-#include "fontT.h"
 #include "pins_config.h"
+#include "USB.h"
+#include "USBHIDKeyboard.h"
+#include "nvs_flash.h"
+#include "nvs.h"
+#include "mbedtls/aes.h"
 
-#include <Arduino.h>
-#include "vault.h"
+// Encryption - IMPORTANT: This is a default key. For any real-world use,
+// you MUST generate a new, random 16-byte key and keep it secret.
+// Exposing this key compromises all stored data.
+byte aes_key[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F};
+byte aes_iv[16]; // Initialization Vector
 
-// Forward declarations
-void show_password_overlay(const String &pw);
+// PIN and password storage
+#define STORAGE_NAMESPACE "vault"
+const char* pin_key = "pin";
+const char* password_key = "password";
+
+// State management
+enum AppState {
+  LOCKED,
+  UNLOCKED,
+  PIN_SETUP,
+  PASSWORD_SETUP
+};
+AppState currentState = LOCKED;
+
+// PIN entry
+String enteredPin = "";
+const int pinLength = 4;
+
+USBHIDKeyboard Keyboard;
 
 TFT_eSPI tft = TFT_eSPI();
-TFT_eSprite sprite = TFT_eSprite(&tft);
 
-bool debug_swap_state = false; // toggle to test sprite byte order at runtime
-
-uint8_t ALS_ADDRESS = 0x3B;
+// Forward declarations
+void setupPin();
+void checkPin();
+void typePassword();
+bool touch_held = false;
 uint8_t read_touchpad_cmd[11] = {0xb5, 0xab, 0xa5, 0x5a, 0x0, 0x0, 0x0, 0x8};
-int tx=0;
-int ty=0;
-int cx=-1;
-int cy=-1;
-int xpos[4]={4,48,92,136};
-int ypos[4]={4,48,92,136};
-String btns[4][4]={{"7","8","9","/"},{"4","5","6","*"},{"1","2","3","-"},{"0",".","=","+"}};
-String num="";
-int deb=0;
-int operation=0;
-float numBuf=0;
-bool touch_held=false;
-#define time_out_reset 30000
-uint16_t touch_timeout=0;
-uint16_t cnt=0;
-// PIN-entry state
-bool in_pin_mode = false;
-String pin_buffer = "";
 
-// colors
-unsigned short col1=0x39C7;
-unsigned short col2=0x2945;
-unsigned short col3=TFT_ORANGE;
-unsigned short col4=TFT_SILVER;
-unsigned short cls[4][4]={{col1,col1,col1,col2},{col1,col1,col1,col2},{col1,col1,col1,col2},{col1,col2,col2,col2}};
-unsigned short tcls[4][4]={{col4,col4,col4,col3},{col4,col4,col4,col3},{col4,col4,col4,col3},{col4,col3,col3,col3}};
+void IRAM_ATTR handleTouchInterrupt() {
+    touch_held = true;
+}
+void encrypt(const String& plainText, byte* output, byte* iv);
+void displayMessage(const String& message, uint16_t color) {
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(color);
+    tft.setTextSize(2);
+    tft.setCursor(20, 50);
+    tft.print(message);
+}
 
-void draw()
-{
-  sprite.fillSprite(TFT_BLACK);
-  sprite.loadFont(fontT);
-  sprite.setTextDatum(0);
-  sprite.fillRoundRect(190,48,460,106,2,col2);
-  sprite.setTextColor(TFT_ORANGE,TFT_BLACK);
-  sprite.drawString("CLEAR",576,8);
-  sprite.fillRect(556,34,80,6,TFT_BLUE);
-  sprite.setTextDatum(4);
+void drawKeypad() {
+    tft.fillScreen(TFT_BLACK);
+    int buttonWidth = 80;
+    int buttonHeight = 50;
+    int startX = 40;
+    int startY = 60;
+    int spacingX = 15;
+    int spacingY = 15;
 
-  for(int i=0;i<4;i++)
-    for(int j=0;j<4;j++){
-      sprite.setTextColor(tcls[i][j],cls[i][j]);
-      sprite.fillRoundRect(xpos[j],ypos[i],40,40,4,cls[i][j]);
-      sprite.drawString(btns[i][j],xpos[j]+20,ypos[i]+20,4);
-      if(cx==j && cy==i) sprite.fillCircle(xpos[j]+8,ypos[i]+8,4,TFT_RED);
+    // Draw PIN entry field
+    tft.drawRect(startX, 10, 3 * buttonWidth + 2 * spacingX, 40, TFT_WHITE);
+    tft.setTextSize(3);
+    tft.setCursor(startX + 10, 20);
+    tft.print(enteredPin);
+
+
+    // Draw number buttons 1-9
+    for (int i = 1; i <= 9; i++) {
+        int col = (i - 1) % 3;
+        int row = (i - 1) / 3;
+        int x = startX + col * (buttonWidth + spacingX);
+        int y = startY + row * (buttonHeight + spacingY);
+        tft.fillRoundRect(x, y, buttonWidth, buttonHeight, 8, TFT_BLUE);
+        tft.setTextColor(TFT_WHITE);
+        tft.setTextSize(2);
+        tft.setCursor(x + 35, y + 15);
+        tft.print(i);
     }
-  sprite.unloadFont();
 
-  sprite.setTextDatum(0);
-  sprite.loadFont(fontT);
-  sprite.setTextColor(TFT_SILVER,TFT_BLACK);
- // sprite.drawString("T-DISPLAY S3 LONG",190,8);
-  sprite.unloadFont();
+    int y_row4 = startY + 3 * (buttonHeight + spacingY);
+    // Clear button
+    tft.fillRoundRect(startX, y_row4, buttonWidth, buttonHeight, 8, TFT_RED);
+    tft.setCursor(startX + 20, y_row4 + 15);
+    tft.print("CLR");
 
-  sprite.loadFont(fontH);
-  sprite.setTextColor(TFT_SILVER,col2);
-  bool lastDot=false;
-  if(num.length()>0 && num.charAt(num.length()-1)=='.') lastDot=true;
-  if(num!="" && lastDot==0){
-    int nn=num.toInt();
-    float nl=num.toFloat()*1000;
-    if((nl-(nn*1000))==0) sprite.drawString(String(nn),210,58);
-    else sprite.drawString(num,210,58);
-    sprite.unloadFont();
+    // 0 button
+    int x_zero = startX + buttonWidth + spacingX;
+    tft.fillRoundRect(x_zero, y_row4, buttonWidth, buttonHeight, 8, TFT_BLUE);
+    tft.setCursor(x_zero + 35, y_row4 + 15);
+    tft.print("0");
+
+    // Enter button
+    int x_ok = startX + 2 * (buttonWidth + spacingX);
+    tft.fillRoundRect(x_ok, y_row4, buttonWidth, buttonHeight, 8, TFT_GREEN);
+    tft.setCursor(x_ok + 25, y_row4 + 15);
+    tft.print("OK");
+}
+String decrypt(byte* cipherText, size_t len, byte* iv);
+void displayMessage(const String& message, uint16_t color);
+void drawKeypad();
+void handleTouch();
+
+
+void setup() {
+    pinMode(TOUCH_INT, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(TOUCH_INT), handleTouchInterrupt, FALLING);
+    
+    // Initialize display
+    Wire.begin(TOUCH_IICSDA, TOUCH_IICSCL);
+    axs15231_init();
+    tft.init();
+    tft.begin();
+    tft.setRotation(1);
+    tft.fillScreen(TFT_BLACK);
+
+    // USB HID setup
+    Keyboard.begin();
+    USB.begin();
+
+  // Initialize NVS
+  esp_err_t err = nvs_flash_init();
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    err = nvs_flash_init();
   }
-  if(lastDot) sprite.drawString(num,210,58);
+  ESP_ERROR_CHECK(err);
 
-  //sprite.loadFont(fontS);
-  sprite.setTextColor(col3,TFT_BLACK);
- // sprite.drawString("NikTheFix ",190,161);
-  sprite.setTextColor(0x8410,TFT_BLACK);
-  //sprite.drawString("VOLOS PROJECTS ",494,161);
- // sprite.pushImage(604,158,30,20,yt);
-
-  // Push the full sprite to the LCD in smaller horizontal stripes to avoid
-  // long blocking SPI transfers that can trigger the watchdog on some boards.
-  const int STRIPE_H = 40; // stripe height in pixels (tuneable)
-  uint16_t *bmp = (uint16_t *)sprite.getPointer();
-  for (int sy = 0; sy < 180; sy += STRIPE_H) {
-    int h = STRIPE_H;
-    if (sy + h > 180) h = 180 - sy;
-    // data pointer offset: each row is 640 pixels
-    uint16_t *stripe_ptr = bmp + (sy * 640);
-    lcd_PushColors_rotated_90(0, sy, 640, h, stripe_ptr);
-    // small yield to allow watchdog and RTOS to run
-    delay(1);
+  // Check if PIN is set
+  nvs_handle_t my_handle;
+  err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &my_handle);
+  if (err != ESP_OK) {
+    displayMessage("NVS Error!", TFT_RED);
+    return;
   }
+
+  size_t required_size = 0;
+  err = nvs_get_blob(my_handle, pin_key, NULL, &required_size);
+  if (err == ESP_ERR_NVS_NOT_FOUND) {
+    currentState = PIN_SETUP;
+    displayMessage("Setup a new PIN", TFT_CYAN);
+    drawKeypad();
+  } else {
+    displayMessage("Enter PIN", TFT_CYAN);
+    drawKeypad();
+  }
+  nvs_close(my_handle);
+}
+
+void loop() {
+  if(touch_held)
+    {
+      handleTouch();
+      drawKeypad();
+      touch_held = false;
+      delay(100);
+    }
+
+  // Handle serial commands for updating credentials
+  if (Serial.available() > 0) {
+    String command = Serial.readStringUntil('\n');
+    command.trim();
+
+    if (command.startsWith("UPDATE_PASS:")) {
+      String new_pass = command.substring(12);
+      nvs_handle_t my_handle;
+      nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &my_handle);
+
+      byte encrypted_pass[128]; // Max password length
+      byte iv[16];
+      encrypt(new_pass, encrypted_pass, iv);
+
+      byte pass_to_store[128 + 16];
+      memcpy(pass_to_store, iv, 16);
+      memcpy(pass_to_store + 16, encrypted_pass, sizeof(encrypted_pass));
+
+      nvs_set_blob(my_handle, password_key, pass_to_store, sizeof(pass_to_store));
+      nvs_commit(my_handle);
+      nvs_close(my_handle);
+      Serial.println("OK: Password updated");
+    }
+    if (command.startsWith("UPDATE_PIN:")) {
+      String new_pin = command.substring(11);
+      if (new_pin.length() == pinLength && new_pin.toInt() >= 0) {
+        nvs_handle_t my_handle;
+        nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &my_handle);
+
+        byte encrypted_pin[32];
+        byte iv[16];
+        encrypt(new_pin, encrypted_pin, iv);
+
+        byte pin_to_store[32 + 16];
+        memcpy(pin_to_store, iv, 16);
+        memcpy(pin_to_store + 16, encrypted_pin, sizeof(encrypted_pin));
+
+        nvs_set_blob(my_handle, pin_key, pin_to_store, sizeof(pin_to_store));
+        nvs_commit(my_handle);
+        nvs_close(my_handle);
+        Serial.println("OK: PIN updated");
+      } else {
+        Serial.println("ERROR: PIN must be " + String(pinLength) + " digits");
+      }
+    }
+  }
+
+  delay(50); // General delay to prevent busy-waiting
 }
 
 
 
-void draw_pin_ui()
-{
-  sprite.fillSprite(TFT_BLACK);
-  sprite.loadFont(fontT);
-  sprite.setTextColor(TFT_SILVER, TFT_BLACK);
-  sprite.drawString("Enter PIN", 40, 20);
-  sprite.unloadFont();
-
-  sprite.loadFont(fontM);
-  sprite.drawString(String(pin_buffer), 40, 80);
-  sprite.unloadFont();
-
-  // draw on screen
-  lcd_PushColors_rotated_90(0, 0, 640, 180, (uint16_t*)sprite.getPointer());
-}
-
-void getTouch()
-{
+void handleTouch() {
     uint8_t buff[20] = {0};
-    Wire.beginTransmission(ALS_ADDRESS);
+    Wire.beginTransmission(0x3B);
     Wire.write(read_touchpad_cmd, 8);
     Wire.endTransmission();
-  Wire.requestFrom((uint8_t)ALS_ADDRESS, (uint8_t)8);
+    Wire.requestFrom(0x3B, 8);
     while (!Wire.available());
     Wire.readBytes(buff, 8);
 
     int pointX=-1;
     int pointY=-1;
-    int type = 0;
 
-    type = AXS_GET_GESTURE_TYPE(buff);
     pointX = AXS_GET_POINT_X(buff,0);
     pointY = AXS_GET_POINT_Y(buff,0);
 
-        if(pointX > 640) pointX = 640;
-        if(pointY > 180) pointY = 180;
+    if (pointX > 0 || pointY > 0) {
+        int tx = map(pointX, 627, 10, 0, 640);
+        int ty = map(pointY, 180, 0, 0, 180);
 
-        
-        tx=map(pointX,627,10,0,640);
-        ty=map(pointY,180,0,0,180);
-        
-        if(tx>180 && tx<590) return;  //mask invalid touch area
-        if(ty>50 && tx>590) return;   //mask invalid tough area
+        int buttonWidth = 80;
+        int buttonHeight = 50;
+        int startX = 40;
+        int startY = 60;
+        int spacingX = 15;
+        int spacingY = 15;
 
-        for(int i=0;i<4;i++)
-        {if(tx>xpos[i] && tx<xpos[i]+44)
-        cx=i;
-        if(ty>ypos[i] && ty<ypos[i]+44)
-        cy=i;}
-
-        if(tx>=590 && tx<=640 && ty>=0 && ty<=50)
-        {num=""; numBuf=0; operation=0; cx=-1; cy=-1;}
-
-    if (cx>=0 && cx<4 && cy>=0 && cy<4 ) {
-        String cs=btns[cy][cx];
-        
-        if(cs=="1" || cs=="2" || cs=="3" || cs=="4" || cs=="5" || cs=="6" || cs=="7" || cs=="8" || cs=="9" || cs=="0")
-        {num=num+cs; if(num.length()>7) {num=""; numBuf=0; operation=0; cx=-1; cy=-1;}}
-
-        if(cs==".")
-        {
-          bool finded=0;
-          for(int i=0;i<num.length();i++)
-          if(num.charAt(i)=='.')
-          finded=true;
-
-          if(!finded)
-          num=num+cs;
+        // Check number buttons 1-9
+        for (int i = 1; i <= 9; i++) {
+            int col = (i - 1) % 3;
+            int row = (i - 1) / 3;
+            int x = startX + col * (buttonWidth + spacingX);
+            int y = startY + row * (buttonHeight + spacingY);
+            if (tx > x && tx < x + buttonWidth && ty > y && ty < y + buttonHeight) {
+                if (enteredPin.length() < pinLength) enteredPin += String(i);
+                return;
+            }
         }
 
-        if(cs=="+")
-        {operation=1; numBuf=num.toFloat();
-        num="";
-        }   
-
-        if(cs=="-")
-        {operation=2; numBuf=num.toFloat();
-        num="";
-        } 
-
-         if(cs=="*")
-        {operation=3; numBuf=num.toFloat();
-        num="";
-        } 
-
-         if(cs=="/")
-        {operation=4; numBuf=num.toFloat();
-        num="";
-        } 
-
-        if(cs=="=")
-        {
-          
-        if(operation==1) 
-        {numBuf=numBuf+num.toFloat();
-        num=String(numBuf);}
-
-        if(operation==2) 
-        {numBuf=numBuf-num.toFloat();
-        num=String(numBuf);}
-
-        if(operation==3) 
-        {numBuf=numBuf*num.toFloat();
-        num=String(numBuf);}
-
-        if(operation==4) 
-        {numBuf=numBuf/num.toFloat();
-        num=String(numBuf);}
-        
-        }        
-    }     
-}
-
-
-void setup() {
-    pinMode(TOUCH_INT, INPUT_PULLUP);
-  Serial.begin(115200);
-  Serial.println("startup: Serial initialized");
-    sprite.createSprite(640, 180);    // full screen landscape sprite in psram
-    sprite.setSwapBytes(1);
-
-    // comment out if using variable brightness
-    pinMode(TFT_BL, OUTPUT);
-    digitalWrite(TFT_BL, HIGH);
-
-
-    // if using esp32 3.0.0-alpha3 then you can use the following 2 lines to adjust the backlight brightness
-    //ledcAttach(TFT_BL, 10000, 8);// pin, pwm freq, resolution in bits
-    //ledcWrite(TFT_BL, 30);// pin, pulse width (a.k.a brightness 0-255)
-
-    
-
-    //ini touch screen 
-    pinMode(TOUCH_RES, OUTPUT);
-    digitalWrite(TOUCH_RES, HIGH);delay(2);
-    digitalWrite(TOUCH_RES, LOW);delay(10);
-    digitalWrite(TOUCH_RES, HIGH);delay(2);
-    Wire.begin(TOUCH_IICSDA, TOUCH_IICSCL);
-
-    //init display 
-    axs15231_init();
-  Serial.println("axs15231_init done");
-    // init vault and defaults
-    vault_init();
-  Serial.println("vault_init done");
-    if (!vault_has_pin()) {
-      vault_set_pin("1234");
-      vault_store_password("default", "345678");
-    }
-    draw();
-    
-}
-
-void loop() {
-  if(digitalRead(TOUCH_INT)==LOW) {
-    if(touch_held==false){ getTouch(); draw(); }
-    touch_held=true;
-    touch_timeout=0;
-  }
-  // runtime debug: if user taps very top-left corner (0..40, 0..40) toggle swap
-  if (digitalRead(TOUCH_INT)==LOW) {
-    // getTouch will set tx/ty; check small corner
-    if (tx >= 0 && tx <= 40 && ty >= 0 && ty <= 40) {
-      debug_swap_state = !debug_swap_state;
-      sprite.setSwapBytes(debug_swap_state ? 1 : 0);
-      Serial.print("Toggled swapBytes -> "); Serial.println(debug_swap_state ? 1 : 0);
-      //draw_test_pattern();
-      delay(500);
-    }
-  }
-  // if user tapped CLEAR area start PIN mode
-  if (tx>=590 && tx<=640 && ty>=0 && ty<=50 && !in_pin_mode) {
-    in_pin_mode = true;
-    pin_buffer = "";
-    draw_pin_ui();
-    delay(200);
-  }
-
-  // PIN mode handling: use calculator keypad to enter PIN and '=' to submit
-  if (in_pin_mode && cx>=0 && cy>=0) {
-    String cs = btns[cy][cx];
-    if (cs=="=") {
-      if (vault_check_pin(pin_buffer)) {
-        Serial.println("PIN OK - typing password");
-        String pw;
-        if (vault_retrieve_password("default", pw)) {
-          show_password_overlay(pw);
-        } else {
-          Serial.println("vault_retrieve_password failed");
+        int y_row4 = startY + 3 * (buttonHeight + spacingY);
+        // Clear button
+        if (tx > startX && tx < startX + buttonWidth && ty > y_row4 && ty < y_row4 + buttonHeight) {
+            enteredPin = "";
+            return;
         }
-      } else {
-        Serial.println("PIN FAIL");
-      }
-      in_pin_mode = false;
-      // consume this touch so we don't loop on the same press
-      cx = -1; cy = -1;
-      draw();
-      delay(300);
-    } else if (cs==".") {
-      // ignore
+        // 0 button
+        int x_zero = startX + buttonWidth + spacingX;
+        if (tx > x_zero && tx < x_zero + buttonWidth && ty > y_row4 && ty < y_row4 + buttonHeight) {
+            if (enteredPin.length() < pinLength) enteredPin += "0";
+            return;
+        }
+        // Enter button
+        int x_ok = startX + 2 * (buttonWidth + spacingX);
+        if (tx > x_ok && tx < x_ok + buttonWidth && ty > y_row4 && ty < y_row4 + buttonHeight) {
+            if (currentState == PIN_SETUP) {
+                setupPin();
+            } else {
+                checkPin();
+            }
+            return;
+        }
+    }
+}
+
+void setupPin() {
+  if (enteredPin.length() != pinLength) {
+    displayMessage("PIN must be " + String(pinLength) + " digits!", TFT_RED);
+    enteredPin = "";
+    delay(2000);
+    drawKeypad();
+    return;
+  }
+
+  nvs_handle_t my_handle;
+  esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &my_handle);
+  if (err != ESP_OK) {
+      displayMessage("NVS Write Error!", TFT_RED);
+      return;
+  }
+
+  // Encrypt and store PIN
+  byte encrypted_pin[16]; // AES128 encrypts to 16 bytes
+  byte iv[16];
+  encrypt(enteredPin, encrypted_pin, iv);
+
+  byte pin_to_store[32]; // 16 for IV + 16 for data
+  memcpy(pin_to_store, iv, 16);
+  memcpy(pin_to_store + 16, encrypted_pin, 16);
+
+  err = nvs_set_blob(my_handle, pin_key, pin_to_store, sizeof(pin_to_store));
+  nvs_commit(my_handle);
+  nvs_close(my_handle);
+
+  if (err == ESP_OK) {
+    displayMessage("PIN Set! Enter PIN to unlock.", TFT_GREEN);
+    currentState = LOCKED;
+    enteredPin = "";
+    delay(2000);
+    drawKeypad();
+  } else {
+    displayMessage("Failed to save PIN!", TFT_RED);
+    delay(2000);
+    drawKeypad();
+  }
+}
+
+void checkPin() {
+    nvs_handle_t my_handle;
+    esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &my_handle);
+    if (err != ESP_OK) {
+        displayMessage("NVS Read Error!", TFT_RED);
+        return;
+    }
+
+    size_t required_size = 32; // IV + PIN
+    byte stored_data[required_size];
+    err = nvs_get_blob(my_handle, pin_key, stored_data, &required_size);
+    nvs_close(my_handle);
+
+    if (err != ESP_OK) {
+        currentState = PIN_SETUP;
+        displayMessage("No PIN set. Please set one.", TFT_CYAN);
+        delay(2000);
+        drawKeypad();
+        return;
+    }
+
+    byte iv[16];
+    memcpy(iv, stored_data, 16);
+    String storedPin_decrypted = decrypt(stored_data + 16, 16, iv);
+
+    if (enteredPin.equals(storedPin_decrypted)) {
+        currentState = UNLOCKED;
+        displayMessage("Unlocked! Typing password...", TFT_GREEN);
+        typePassword();
+        delay(2000);
+        // Relock device
+        currentState = LOCKED;
+        enteredPin = "";
+        drawKeypad();
     } else {
-      pin_buffer += cs;
-      // consume this touch so we don't append the same digit repeatedly
-      cx = -1; cy = -1;
-      draw_pin_ui();
-      delay(200);
+        displayMessage("Incorrect PIN!", TFT_RED);
+        enteredPin = "";
+        delay(1000);
+        tft.fillRect(10, 35, 300, 20, TFT_BLACK); // Clear incorrect pin message
     }
-  }
-  touch_timeout++;
-  if(touch_timeout >= time_out_reset) { touch_held=false; touch_timeout=time_out_reset; }
 }
 
-void show_password_overlay(const String &pw)
-{
-  // simple overlay that shows the password for 3 seconds
-  sprite.fillSprite(TFT_BLACK);
-  sprite.loadFont(fontT);
-  sprite.setTextColor(TFT_SILVER, TFT_BLACK);
-  sprite.drawString("Password:", 40, 20);
-  sprite.unloadFont();
+void typePassword() {
+    nvs_handle_t my_handle;
+    esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &my_handle);
+    if (err != ESP_OK) {
+        displayMessage("NVS Read Error!", TFT_RED);
+        return;
+    }
 
-  sprite.loadFont(fontM);
-  sprite.setTextColor(TFT_ORANGE, TFT_BLACK);
-  sprite.drawString(pw, 40, 80);
-  sprite.unloadFont();
+    size_t required_size = 128 + 16; // IV + Password
+    byte stored_data[required_size];
+    err = nvs_get_blob(my_handle, password_key, stored_data, &required_size);
+    nvs_close(my_handle);
 
-  lcd_PushColors_rotated_90(0, 0, 640, 180, (uint16_t*)sprite.getPointer());
-  delay(3000);
-  draw();
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        displayMessage("No password set!", TFT_YELLOW);
+        return;
+    } else if (err != ESP_OK) {
+        displayMessage("Read failed!", TFT_RED);
+        return;
+    }
+
+    byte iv[16];
+    memcpy(iv, stored_data, 16);
+    String password = decrypt(stored_data + 16, 128, iv);
+
+    Keyboard.print(password);
 }
 
-// forward declaration so loop() can call it before its definition
-void show_password_overlay(const String &pw);
+
+void encrypt(const String& plainText, byte* output, byte* iv) {
+    mbedtls_aes_context aes;
+    mbedtls_aes_init(&aes);
+
+    // Generate a random IV
+    for(int i=0; i<16; i++) {
+        iv[i] = random(256);
+    }
+
+    // PKCS7 padding
+    int plainTextLen = plainText.length();
+    int paddedLen = plainTextLen + (16 - (plainTextLen % 16));
+    byte paddedText[paddedLen];
+    memcpy(paddedText, plainText.c_str(), plainTextLen);
+    byte padValue = 16 - (plainTextLen % 16);
+    for (int i = plainTextLen; i < paddedLen; i++) {
+        paddedText[i] = padValue;
+    }
+
+    mbedtls_aes_setkey_enc(&aes, aes_key, 128);
+    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, paddedLen, iv, paddedText, output);
+    mbedtls_aes_free(&aes);
+}
+
+String decrypt(byte* cipherText, size_t len, byte* iv) {
+    mbedtls_aes_context aes;
+    mbedtls_aes_init(&aes);
+
+    byte decrypted[len];
+
+    mbedtls_aes_setkey_dec(&aes, aes_key, 128);
+    mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, len, iv, cipherText, decrypted);
+    mbedtls_aes_free(&aes);
+
+    // Remove PKCS7 padding
+    char pad = decrypted[len - 1];
+    if (pad > 16 || pad == 0) {
+        // Invalid padding
+        return "";
+    }
+    int plainTextLen = len - pad;
+
+    char plainText[plainTextLen + 1];
+    memcpy(plainText, decrypted, plainTextLen);
+    plainText[plainTextLen] = '\0';
+
+    return String(plainText);
+}

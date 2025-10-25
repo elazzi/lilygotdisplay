@@ -2,7 +2,7 @@
 
 /***********************config*************************/
 
-#define AXS_SPI_FREQUENCY     20000000 // lowered from 32MHz to 20MHz to reduce SPI stress
+#define SPI_FREQUENCY         32000000 // corruption occured at 40000000 so 32000000 is probably a safe upper limit
 #define TFT_SPI_MODE          SPI_MODE0
 #define TFT_SPI_HOST          SPI2_HOST
 
