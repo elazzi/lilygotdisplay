@@ -220,6 +220,6 @@ void loop()
     {
       getTouch();
       touch_held = false;
-      delay(100);
+      delay(250);
     }
 }
