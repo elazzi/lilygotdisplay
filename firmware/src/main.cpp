@@ -24,7 +24,7 @@ int ty=0;
 int cx=-1;
 int cy=-1;
 int xpos[] = {4,92,180,268};
-int ypos[] = {4,52,100,148};
+int ypos[] = {4,43,82,121};
  String btns[4][3] = {{"1","2","3"},{"4","5","6"},{"7","8","9"},{"CLR","0","OK"}};
 String pin_buffer="";
 String new_pin_buffer = "";
@@ -74,21 +74,24 @@ void draw()
 
     // Draw keypad
     sprite.setTextFont(1);
-    sprite.setTextSize(2);
+    sprite.setTextSize(1);
     for (int y = 0; y < 4; y++) {
         for (int x = 0; x < 3; x++) {
             int x_pos = xpos[x];
             int y_pos = ypos[y];
-            sprite.fillRoundRect(x_pos, y_pos, 80, 40, 8, cls[y][x]);
+            sprite.fillRoundRect(x_pos, y_pos, 80, 35, 8, cls[y][x]);
             sprite.setTextColor(tcls[y][x], cls[y][x]);
-            sprite.drawCentreString(btns[y][x], x_pos + 40, y_pos + 12, 2);
+            sprite.drawCentreString(btns[y][x], x_pos + 40, y_pos + 17, 2);
         }
     }
+    sprite.setTextSize(2);
 
     if (currentState == STATE_PIN_ENTRY) {
-        sprite.fillRoundRect(350, 148, 120, 40, 8, col2);
+        sprite.fillRoundRect(350, 121, 120, 35, 8, col2);
         sprite.setTextColor(col3, col2);
-        sprite.drawCentreString("CLEAR ALL", 350 + 60, 148 + 20, 2);
+        sprite.setTextSize(1);
+        sprite.drawCentreString("CLEAR ALL", 350 + 60, 121 + 17, 2);
+        sprite.setTextSize(2);
     }
 
     lcd_PushColors_rotated_90(0, 0, 640, 180, (uint16_t*)sprite.getPointer());
@@ -158,7 +161,7 @@ void getTouch()
             for (int x = 0; x < 3; x++) {
                 int x_pos = xpos[x];
                 int y_pos = ypos[y];
-                if (tx >= x_pos && tx <= x_pos + 80 && ty >= y_pos && ty <= y_pos + 40) {
+                if (tx >= x_pos && tx <= x_pos + 80 && ty >= y_pos && ty <= y_pos + 35) {
                     String key = btns[y][x];
                     if (key == "CLR") {
                         pin_buffer = "";
@@ -185,11 +188,12 @@ void getTouch()
                                 if (pin_buffer == new_pin_buffer) {
                                     preferences.putString("pin", pin_buffer);
                                     currentState = STATE_PIN_ENTRY;
+                                    pin_buffer = "";
+                                    new_pin_buffer = "";
                                 } else {
-                                    currentState = STATE_PIN_SETUP_NEW;
+                                    pin_buffer = "";
                                 }
-                                pin_buffer = "";
-                                new_pin_buffer = "";
+                                draw();
                                 break;
                         }
                     } else {
@@ -201,7 +205,7 @@ void getTouch()
             }
         }
         
-        if (currentState == STATE_PIN_ENTRY && tx >= 350 && tx <= 470 && ty >= 148 && ty <= 188) { // CLEAR ALL button
+        if (currentState == STATE_PIN_ENTRY && tx >= 350 && tx <= 470 && ty >= 121 && ty <= 156) { // CLEAR ALL button
             preferences.putBool("setup_pin", true);
             ESP.restart();
             return;
