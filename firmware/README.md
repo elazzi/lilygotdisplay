@@ -1,8 +1,14 @@
 # Password Vault on LilyGO T-Display S3 Long
 
-This project turns a LilyGO T-Display S3 Long into a USB password vault. It allows you to  store passwords on the device and type them into a computer by emulating a USB keyboard. The device is unlocked with a PIN entered on the touch screen.
+This project turns a LilyGO T-Display S3 Long into a USB password vault. 
+It allows you to  store passwords on the device in an AES vault that uses the pin as salt and type them into a computer by emulating a USB keyboard.
+ The device is unlocked with a PIN entered on the touch screen.
+ in the screen to input the pin you have a clear pin putton this will erase all stored contents
+ after clearing content the device restarts   it will not emulate a keybord untill next reboot and will prompt you the first time only for new pin once pin is set 
+  it will accept on console as input the new password once password is saved in an AES hash using the pin as salt
+  device reboots and goes into default functioning mode where it waits for pin
 
-A companion desktop application allows for managing the passwords and PIN on the device.
+A companion desktop application allows for managing the password on the device.
 
 
 
