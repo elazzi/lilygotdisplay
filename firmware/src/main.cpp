@@ -1176,7 +1176,7 @@ void drawWipeConfirmation() {
     sprite.fillSprite(COLOR_BG);
     sprite.setTextColor(TFT_WHITE, COLOR_BG);
     sprite.drawCentreString("WIPE ALL DATA?", TFT_WIDTH / 2, 30, 4);
-    sprite.drawCentreString("logn touch to confirm", TFT_WIDTH / 2, 70, 2);
+    sprite.drawCentreString("Long touch to confirm", TFT_WIDTH / 2, 70, 2);
     
     unsigned long hold_time = millis() - wipe_start_time;
     int progress = (hold_time * 100) / WIPE_HOLD_TIME_MS;

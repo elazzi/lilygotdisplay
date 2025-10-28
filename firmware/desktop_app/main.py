@@ -8,7 +8,7 @@ import queue
 class PasswordVaultApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Password Vault Manager")
+        self.root.title("Device Password Setup Tool")
 
         self.serial_port = None
         self.read_queue = queue.Queue()
@@ -22,36 +22,22 @@ class PasswordVaultApp:
 
         self.port_combobox = ttk.Combobox(self.port_frame)
         self.port_combobox.pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill="x")
-        self.populate_ports()
 
         self.connect_button = ttk.Button(self.port_frame, text="Connect", command=self.connect_serial)
         self.connect_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # --- Password Management ---
-        self.password_frame = ttk.LabelFrame(root, text="Update Password")
+        self.password_frame = ttk.LabelFrame(root, text="Set Device Password")
         self.password_frame.pack(padx=10, pady=5, fill="x")
 
-        self.password_label = ttk.Label(self.password_frame, text="New Password:")
+        self.password_label = ttk.Label(self.password_frame, text="Password:")
         self.password_label.pack(side=tk.LEFT, padx=5, pady=5)
 
-        self.password_entry = ttk.Entry(self.password_frame, show="*")
+        self.password_entry = ttk.Entry(self.password_frame)
         self.password_entry.pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill="x")
 
-        self.send_password_button = ttk.Button(self.password_frame, text="Update Password", command=self.update_password)
+        self.send_password_button = ttk.Button(self.password_frame, text="Set Password", command=self.set_password)
         self.send_password_button.pack(side=tk.LEFT, padx=5, pady=5)
-
-        # --- PIN Management ---
-        self.pin_frame = ttk.LabelFrame(root, text="Update PIN")
-        self.pin_frame.pack(padx=10, pady=5, fill="x")
-
-        self.pin_label = ttk.Label(self.pin_frame, text="New PIN (4 digits):")
-        self.pin_label.pack(side=tk.LEFT, padx=5, pady=5)
-
-        self.pin_entry = ttk.Entry(self.pin_frame, show="*")
-        self.pin_entry.pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill="x")
-
-        self.send_pin_button = ttk.Button(self.pin_frame, text="Update PIN", command=self.update_pin)
-        self.send_pin_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # --- Status Area ---
         self.status_frame = ttk.LabelFrame(root, text="Device Status")
@@ -61,12 +47,27 @@ class PasswordVaultApp:
         self.status_text.pack(padx=5, pady=5, fill="both", expand=True)
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.scan_ports() # Start the port scanning loop
 
-    def populate_ports(self):
+    def scan_ports(self):
+        """Scans for available serial ports and updates the combobox."""
+        # Don't update the list if the user has the dropdown open
+        # Check if the combobox has focus, which indicates user interaction.
+        if self.root.focus_get() == self.port_combobox:
+            return
+
+        current_selection = self.port_combobox.get()
         ports = [port.device for port in serial.tools.list_ports.comports()]
         self.port_combobox['values'] = ports
-        if ports:
+
+        if current_selection in ports:
+            self.port_combobox.set(current_selection)
+        elif ports:
             self.port_combobox.set(ports[0])
+        else:
+            self.port_combobox.set('')
+        
+        self.root.after(5000, self.scan_ports) # Schedule the next scan
 
     def connect_serial(self):
         if self.serial_port and self.serial_port.is_open:
@@ -123,21 +124,14 @@ class PasswordVaultApp:
         else:
             messagebox.showwarning("Not Connected", "Please connect to a serial port first.")
 
-    def update_password(self):
+    def set_password(self):
         password = self.password_entry.get()
         if password:
-            self.send_command(f"UPDATE_PASS:{password}")
+            # Send the raw password string, which is what the firmware expects
+            self.send_command(password)
             self.password_entry.delete(0, tk.END)
         else:
             messagebox.showwarning("Input Error", "Password cannot be empty.")
-
-    def update_pin(self):
-        pin = self.pin_entry.get()
-        if len(pin) == 4 and pin.isdigit():
-            self.send_command(f"UPDATE_PIN:{pin}")
-            self.pin_entry.delete(0, tk.END)
-        else:
-            messagebox.showwarning("Input Error", "PIN must be 4 digits.")
 
     def log_status(self, message):
         self.status_text.config(state="normal")
