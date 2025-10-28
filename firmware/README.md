@@ -124,6 +124,30 @@ This Python application lets you update the password and PIN on your device from
       python main.py
       ```
 
+### Part 2a (Optional): Building a Standalone Executable
+
+If you want to create a single `.exe` file that can be run on any Windows computer without needing to install Python or any libraries, you can build the application using `PyInstaller`.
+
+1.  **Navigate to the Desktop App Folder:**
+    *   Open a Command Prompt and navigate to the `desktop_app` directory as shown in the previous step.
+
+2.  **Install PyInstaller:**
+    *   If you haven't already, install the required libraries, including `PyInstaller`:
+      ```
+      pip install -r requirements.txt
+      ```
+
+3.  **Build the Executable:**
+    *   Run the following command. This will bundle the application and all its dependencies into a single executable file.
+      ```
+      pyinstaller --onefile --windowed main.py
+      ```
+
+4.  **Find the Executable:**
+    *   After the process completes, you will find a new `dist` folder inside the `desktop_app` directory.
+    *   Your standalone application, `main.exe`, will be inside this `dist` folder. You can now run this file directly or share it with others.
+
+
 ### Part 3: Using the Application
 1.  **Connect to the Device:**
     *   With the LilyGO device plugged into your PC, open the desktop app.
