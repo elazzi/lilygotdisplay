@@ -1,12 +1,59 @@
-# Password Vault on LilyGO T-Display S3 Long
+Project Brief: LilyGO T-Display S3 Long - USB Password Device
+1. Core Objective
+To create firmware for the LilyGO T-Display S3 Long that turns it into a secure, single-password USB input device. The device will store one password, securely encrypted, which can be "typed" into a host computer by emulating a USB keyboard. All interaction, including unlock and setup, will be handled via the device's touch screen.
+2. Hardware Target
+•	LilyGO T-Display S3 Long
+3. Core Features
+•	PIN-Based Unlock: The device is secured by a user-defined PIN entered on the touch screen.
+•	Secure Storage: A single password (e.g., a complex master password) is stored on the device's non-volatile memory.
+•	AES Encryption: The stored password must be encrypted using AES. The user's PIN must be used to derive the AES encryption key (e.g., via a KDF). The PIN itself should be stored as a hash for verification, not in plain text.
+•	USB Keyboard (HID) Emulation: When unlocked, the device connects as a USB keyboard and types the stored password.
+•	On-Screen QWERTY Keyboard: A touch-screen QWERTY keyboard is required for the initial setup to enter the password that will be stored.
+•	Secure Data Wipe: A dedicated function to erase all user data (PIN and encrypted password), forcing the device back into setup mode.
+4. User Flow & Screen Logic
+This device has three distinct operational flows:
+Flow 1: First-Time Setup (or Post-Wipe)
+This flow is triggered when no PIN is found in memory.
+1.	Boot: Device starts.
+2.	Screen 1: Set PIN: Display a numeric-style keypad. Prompt the user: "Set a new PIN."
+3.	Screen 2: Confirm PIN: Prompt the user: "Confirm your PIN."
+o	On Mismatch: Show "PINs do not match. Try again." and return to Screen 1.
+o	On Match: Proceed to Screen 3.
+4.	Screen 3: Set Password: Display a full QWERTY touch keyboard. Prompt the user: "Enter the password to store."
+o	The user taps out the password character by character.
+o	The user taps an "Enter" or "OK" key on the on-screen keyboard.
+5.	Action: Save & Encrypt:
+o	The device hashes the new PIN for verification and stores the hash.
+o	The device uses the new PIN to derive an AES key.
+o	The device encrypts the password entered on the QWERTY keyboard using the derived key.
+o	The device saves the encrypted password to non-volatile memory.
+6.	Action: Reboot: Once the password is saved, the device automatically reboots.
+Constraint: During this entire setup flow, USB keyboard (HID) emulation must be completely disabled.
+Flow 2: Standard Operation (Default Mode)
+This is the default mode after the device has been set up.
+1.	Boot: Device starts and immediately displays Screen 4: PIN Unlock.
+2.	Screen 4: PIN Unlock:
+o	Displays a numeric keypad for PIN entry.
+o	Displays a "Clear All Data" button (see Flow 3).
+3.	User Action: Enters PIN.
+o	On Correct PIN:
+1.	The device unlocks.
+2.	It emulates a USB keyboard.
+3.	It types the single, decrypted password one time.
+4.	(Recommendation: After typing, the device should immediately re-lock itself and return to Screen 4).
+o	On Incorrect PIN:
+1.	Display "Incorrect PIN."
+2.	Remain on Screen 4, waiting for the correct PIN.
+Flow 3: Secure Data Wipe
+This flow is initiated by the user from the unlock screen.
+1.	Boot: Device is in "Standard Operation" (Flow 2) at Screen 4: PIN Unlock.
+2.	User Action: The user presses the "Clear All Data" button on the PIN screen.
+o	(Recommendation: Add a confirmation step, e.g., "Hold for 3 seconds to wipe" or "Tap again to confirm wipe.")
+3.	Action: Wipe: The device securely erases all user-defined content from non-volatile memory (the PIN hash and the encrypted password).
+4.	Action: Reboot: The device immediately reboots.
+5.	Result: Upon rebooting, the device finds no PIN and automatically enters Flow 1: First-Time Setup.
 
-This project turns a LilyGO T-Display S3 Long into a USB password vault. 
-It allows you to  store passwords on the device in an AES vault that uses the pin as salt and type them into a computer by emulating a USB keyboard.
- The device is unlocked with a PIN entered on the touch screen.
- in the screen to input the pin you have a clear pin putton this will erase all stored contents
- after clearing content the device restarts   it will not emulate a keybord untill next reboot and will prompt you the first time only for new pin once pin is set 
-  it will accept on console as input the new password once password is saved in an AES hash using the pin as salt
-  device reboots and goes into default functioning mode where it waits for pin
+
 
 A companion desktop application allows for managing the password on the device.
 
