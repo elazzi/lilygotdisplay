@@ -1,16 +1,16 @@
 Project Brief: LilyGO T-Display S3 Long - USB Password Device
 
 1. Core Objective
-To create firmware for the LilyGO T-Display S3 Long that turns it into a secure, single-password USB input device. The device will store one password, securely encrypted, which can be "typed" into a host computer by emulating a USB keyboard. All interaction, including unlock and setup, will be handled via the device's touch screen.
+To create firmware for the LilyGO T-Display S3 Long that turns it into a secure, multi-password USB input device. The device will store up to four passwords, securely encrypted, which can be "typed" into a host computer by emulating a USB keyboard. All interaction, including unlock and setup, will be handled via the device's touch screen.
 
 2. Hardware Target
 •	LilyGO T-Display S3 Long
 
 3. Core Features
 •	PIN-Based Unlock: The device is secured by a user-defined PIN entered on the touch screen.
-•	Secure Storage: A single password (e.g., a complex master password) is stored on the device's non-volatile memory.
+•	Secure Storage: Up to four passwords (e.g., complex master passwords) are stored on the device's non-volatile memory.
 •	**AES-256 Encryption:** The stored password is encrypted using AES-256. The user's PIN is used to derive the encryption key via PBKDF2. The PIN itself is stored as a SHA-256 hash for verification, not in plain text.
-•	**USB Keyboard (HID) Emulation:** When unlocked, the device connects as a USB keyboard and types the stored password.
+•	**USB Keyboard (HID) Emulation:** When unlocked, the user can select one of the stored passwords from a touch screen menu, which the device then types as a USB keyboard.
 •	**Serial Password Input:** For maximum security and to support complex passwords, the password to be stored is entered via a standard serial monitor during setup, not on the screen.
 •	Secure Data Wipe: A dedicated function to erase all user data (PIN and encrypted password), forcing the device back into setup mode.
 
@@ -23,16 +23,15 @@ This flow is triggered when no PIN is found in memory.
 2.	**Screen 1: Set PIN:** Display a numeric keypad. Prompt the user: "Enter New PIN."
 3.	**Screen 2: Confirm PIN:** Prompt the user: "Confirm New PIN."
     -	On Mismatch: Show "PINs do not match" and return to Screen 1.
-    -	On Match: Proceed to Screen 3.
-4.	**Screen 3: Set Password via Serial:** Display instructions: "Enter password in Serial Monitor and press Enter."
+    -	On Match: Proceed to the next screen.
+4.	**Screen 3: Set Passwords via Serial:** Display instructions: "Enter Password 1 in Serial Monitor and press Enter."
     -	The user opens a serial monitor (like the one in Arduino IDE or PlatformIO).
-    -	The user types or pastes the password and presses Enter.
+    -	The user types or pastes the first password and presses Enter. The screen will then prompt for "Password 2", and so on, up to four passwords.
+    -	To finish setup before adding all four passwords, the user can submit an empty password (just press Enter).
 5.	**Action: Save & Encrypt:**
     -	The device hashes the new PIN for verification and stores the hash.
-    -	The device uses the new PIN to derive an AES key.
-    -	The device encrypts the password received via serial using the derived key.
-    -	The device saves the encrypted password to non-volatile memory.
-6.	**Action: Reboot:** Once the password is saved, the device automatically reboots into standard operation mode.
+    -	For each password received via serial, the device uses the new PIN to derive an AES key, encrypts the password, and saves the encrypted result to non-volatile memory.
+6.	**Action: Reboot:** Once the user has finished entering passwords, the device automatically reboots into standard operation mode.
 
 *Constraint: During this entire setup flow, USB keyboard (HID) emulation is disabled.*
 
@@ -43,11 +42,12 @@ This is the default mode after the device has been set up.
     -	Displays a numeric keypad for PIN entry.
     -	Displays a "CLEAR ALL" button (see Flow 3).
 3.	**User Action:** Enters PIN and taps "OK".
-    -	**On Correct PIN:**
-        1. The device unlocks.
-        2. It emulates a USB keyboard.
-        3. It types the single, decrypted password one time.
-        4. The device immediately returns to the PIN unlock screen.
+    -	**On Correct PIN:** The device unlocks and proceeds to **Screen 5: Password Selection**.
+4.	**Screen 5: Password Selection:**
+    -	Displays four buttons, labeled "Password 1" through "Password 4".
+5.	**User Action:** Taps one of the password buttons.
+    -	The device emulates a USB keyboard and types the corresponding decrypted password one time.
+    -	For security, the device immediately re-locks and returns to the PIN unlock screen.
     -	**On Incorrect PIN:**
         1. Display "Incorrect PIN" and the number of attempts remaining.
         2. After 5 failed attempts, the device enters a 30-second lockout.
@@ -56,9 +56,9 @@ Flow 3: Secure Data Wipe
 This flow is initiated by the user from the unlock screen.
 1.	**Start:** Device is at the "PIN Unlock" screen.
 2.	**User Action:** The user taps the "CLEAR ALL" button.
-3.	**Screen 5: Wipe Confirmation:** Display "WIPE ALL DATA? Long touch to confirm".
+3.	**Screen 6: Wipe Confirmation:** Display "WIPE ALL DATA? Long touch to confirm".
 4.	**User Action:** The user touches and holds the screen for 3 seconds.
-5.	**Action: Wipe:** The device securely erases all user-defined content from non-volatile memory (the PIN hash and the encrypted password).
+5.	**Action: Wipe:** The device securely erases all user-defined content from non-volatile memory (the PIN hash and all encrypted passwords).
 6.	**Action: Reboot:** The device immediately reboots.
 7.	**Result:** Upon rebooting, the device finds no PIN and automatically enters Flow 1: First-Time Setup.
 
@@ -90,9 +90,10 @@ The firmware is the code that runs on your LilyGO T-Display S3 Long. We will use
     *   PlatformIO will now compile the code and upload it to your device. You can see the progress in the terminal window. If it's successful, the device will restart.
 
 4.  **Initial Setup on Device:**
-    *   The first time you run the device, it will ask you to set a 4-digit PIN. Use the on-screen keypad to enter a PIN and press "OK".
+    *   The first time you run the device, it will ask you to set a PIN (at least 4 digits). Use the on-screen keypad to enter a PIN and press "OK".
     *   Confirm the PIN on the next screen.
-    *   The device will then ask you to enter the password via the serial port.
+    *   The device will then ask you to enter your passwords one by one via the serial port. You can add up to four.
+    *   To finish adding passwords, simply press Enter on an empty line in the serial monitor.
 
 ### Part 2: Running the Desktop Management App
 

@@ -682,6 +682,7 @@ void hw_clear_screen_black()
 
 // Security constants
 #define MAX_PIN_LENGTH      10
+#define MAX_PASSWORDS       4
 #define MAX_PASSWORD_LENGTH 1024
 #define PBKDF2_ITERATIONS   5000  // Reduced for ESP32 performance
 #define AES_KEY_SIZE        32
@@ -717,6 +718,7 @@ enum AppState {
     STATE_SETUP_PIN_CONFIRM,
     STATE_SETUP_PASSWORD,
     STATE_PIN_ENTRY,
+    STATE_PASSWORD_SELECTION,
     STATE_WIPE_CONFIRM,
     STATE_LOCKED_OUT,
     STATE_ERROR
@@ -734,6 +736,7 @@ unsigned long lockout_start_time = 0;
 bool wiping = false;
 int pin_attempts = 0;
 
+int setup_password_index = 1;
 int qwerty_page = 0; // 0 for alpha, 1 for symbols
 // Security buffers (will be securely wiped)
 uint8_t aes_key[AES_KEY_SIZE] = {0};
@@ -765,6 +768,8 @@ void hmac_sha256(const uint8_t* key, size_t keylen, const uint8_t* data, size_t 
 void handleTouchInterrupt();
 void handleOKButton();
 void handlePasswordOK();
+void typePassword(int index);
+void finishSetup();
 
 // ==================== INTERRUPT HANDLER ====================
 
@@ -1074,7 +1079,9 @@ void secureWipe() {
     
     preferences.remove("salt");
     preferences.remove("pin_hash");
-    preferences.remove("enc_pass");
+    for (int i = 1; i <= MAX_PASSWORDS; i++) {
+        preferences.remove(("enc_pass_" + String(i)).c_str());
+    }
     preferences.remove("is_configured");
     preferences.putBool("needs_setup", true);
 }
@@ -1110,21 +1117,13 @@ void initializeTouch() {
 
 
 void drawNumpadScreen(const String& title, bool show_error = false) {
-     sprite.fillSprite(TFT_BLACK);
+    sprite.fillSprite(TFT_BLACK);
     sprite.setTextFont(1);
     sprite.setTextSize(2);
     sprite.setTextColor(TFT_SILVER, TFT_BLACK);
-    switch (currentState) {
-        case STATE_PIN_ENTRY:
-            sprite.drawString("Enter PIN", 350, 10);
-            break;
-        case STATE_SETUP_PIN_NEW:
-            sprite.drawString("Enter New PIN", 350, 10);
-            break;
-        case STATE_SETUP_PIN_CONFIRM:
-            sprite.drawString("Confirm New PIN", 350, 10);
-            break;
-    }
+    sprite.drawString(title, 350, 10);
+
+    
 
     // Draw PIN buffer
     sprite.drawRect(350, 40, 260, 40, TFT_WHITE);
@@ -1148,14 +1147,13 @@ void drawNumpadScreen(const String& title, bool show_error = false) {
     }
     sprite.setTextSize(2);
 
+    // Draw the "CLEAR ALL" button only on the main PIN entry screen
     if (currentState == STATE_PIN_ENTRY) {
         sprite.fillRoundRect(350, 111, 120, 35, 8, COLOR_BTN2);
         sprite.setTextColor(TFT_ORANGE, COLOR_BTN2);
         sprite.setTextSize(1);
         sprite.drawCentreString("CLEAR ALL", 350 + 60, 111 + 17, 2);
-        sprite.setTextSize(2);
     }
-
     lcd_PushColors_rotated_90(0, 0, 640, 180, (uint16_t*)sprite.getPointer());
 
     
@@ -1164,10 +1162,31 @@ void drawNumpadScreen(const String& title, bool show_error = false) {
 void drawSerialPasswordEntryScreen() {
     sprite.fillSprite(COLOR_BG);
     sprite.setTextColor(TFT_SILVER, COLOR_BG);
-    sprite.drawCentreString("Set Password", TFT_WIDTH / 2, 30, 4);
-    sprite.drawCentreString("Enter password in Serial Monitor", TFT_WIDTH / 2, 80, 2);
-    sprite.drawCentreString("and press Enter.", TFT_WIDTH / 2, 110, 2);
-    sprite.drawCentreString("Waiting for input...", TFT_WIDTH / 2, 150, 2);
+    sprite.drawCentreString("Set Passwords", TFT_WIDTH / 2, 20, 4);
+    sprite.drawCentreString("Enter Password " + String(setup_password_index) + " in Serial Monitor", TFT_WIDTH / 2, 70, 2);
+    sprite.drawCentreString("Press Enter to submit.", TFT_WIDTH / 2, 100, 2);
+    sprite.drawCentreString("Submit empty password to finish.", TFT_WIDTH / 2, 130, 2);
+    lcd_PushColors_rotated_90(0, 0, TFT_WIDTH, TFT_HEIGHT, (uint16_t*)sprite.getPointer());
+}
+
+void drawPasswordSelectionScreen() {
+    sprite.fillSprite(COLOR_BG);
+    sprite.setTextColor(TFT_SILVER, COLOR_BG);
+    sprite.drawCentreString("Select Password", TFT_WIDTH / 2, 15, 4);
+
+    int btn_width = (TFT_WIDTH - 50) / 2;
+    int btn_height = 50;
+    int x_spacing = 10;
+    int y_spacing = 10;
+    int start_x = 20;
+    int start_y = 60;
+
+    for (int i = 0; i < MAX_PASSWORDS; i++) {
+        int row = i / 2;
+        int col = i % 2;
+        sprite.fillRoundRect(start_x + col * (btn_width + x_spacing), start_y + row * (btn_height + y_spacing), btn_width, btn_height, 8, COLOR_BTN1);
+        sprite.drawCentreString("Password " + String(i + 1), start_x + col * (btn_width + x_spacing) + btn_width / 2, start_y + row * (btn_height + y_spacing) + btn_height / 2 - 8, 2);
+    }
     lcd_PushColors_rotated_90(0, 0, TFT_WIDTH, TFT_HEIGHT, (uint16_t*)sprite.getPointer());
 }
 
@@ -1238,6 +1257,10 @@ void drawScreen() {
         case STATE_PIN_ENTRY:
             Serial.println("Drawing: STATE_PIN_ENTRY");
             drawNumpadScreen("Enter PIN to Unlock");
+            break;
+        case STATE_PASSWORD_SELECTION:
+            Serial.println("Drawing: STATE_PASSWORD_SELECTION");
+            drawPasswordSelectionScreen();
             break;
         case STATE_WIPE_CONFIRM:
             Serial.println("Drawing: STATE_WIPE_CONFIRM");
@@ -1310,7 +1333,7 @@ void handleNumpadInput() {
         
         // Wipe data button (only in PIN entry mode)
         if (currentState == STATE_PIN_ENTRY &&
-            tx >= 350 && tx <= 470 && ty >= 111 && ty <= 146) {
+            tx >= 350 && tx <= (350 + 120) && ty >= 111 && ty <= (111 + 35)) {
             currentState = STATE_WIPE_CONFIRM;
             wipe_start_time = millis();
             drawScreen();
@@ -1318,6 +1341,43 @@ void handleNumpadInput() {
     }
 }
 
+void handlePasswordSelectionInput() {
+    uint8_t buff[8] = {0};
+    Wire.beginTransmission(TOUCH_I2C_ADDR);
+    if (Wire.write(read_touchpad_cmd, 8) != 8) return;
+    if (Wire.endTransmission() != 0) return;
+    
+    uint8_t received = Wire.requestFrom(TOUCH_I2C_ADDR, 8);
+    if (received == 8) Wire.readBytes(buff, 8);
+    else return;
+
+    int pointX = AXS_GET_POINT_X(buff, 0);
+    int pointY = AXS_GET_POINT_Y(buff, 0);
+
+    if (pointX > 0 && pointY > 0) {
+        int tx = map(pointX, 627, 10, 0, TFT_WIDTH);
+        int ty = map(pointY, 180, 0, 0, TFT_HEIGHT);
+
+        int btn_width = (TFT_WIDTH - 50) / 2;
+        int btn_height = 50;
+        int x_spacing = 10;
+        int y_spacing = 10;
+        int start_x = 20;
+        int start_y = 60;
+
+        for (int i = 0; i < MAX_PASSWORDS; i++) {
+            int row = i / 2;
+            int col = i % 2;
+            int btn_x = start_x + col * (btn_width + x_spacing);
+            int btn_y = start_y + row * (btn_height + y_spacing);
+
+            if (tx >= btn_x && tx <= btn_x + btn_width && ty >= btn_y && ty <= btn_y + btn_height) {
+                typePassword(i + 1);
+                return;
+            }
+        }
+    }
+}
 void handleOKButton() {
     Serial.println("handleOKButton called");
     switch (currentState) {
@@ -1354,46 +1414,10 @@ void handleOKButton() {
             if (match) {
                 // Successful unlock
                 Serial.println("PIN match. Unlocking.");
-                pin_attempts = 0;
-                String encrypted_password = preferences.getString("enc_pass", "");
-                
-                if (encrypted_password.length() == 0) {
-                    error_message = "No password stored";
-                    Serial.println("Error: No encrypted password found.");
-                    currentState = STATE_ERROR;
-                    drawScreen();
-                    return;
-                }
-                
-                if (!deriveKey(pin_buffer, salt, aes_key)) {
-                    error_message = "Key derivation failed";
-                    currentState = STATE_ERROR;
-                    Serial.println("Error: Key derivation failed.");
-                    drawScreen();
-                    return;
-                }
-                
-                String decrypted_password;
-                if (!decryptPassword(encrypted_password, aes_key, decrypted_password)) {
-                    error_message = "Decryption failed";
-                    currentState = STATE_ERROR;
-                    Serial.println("Error: Password decryption failed.");
-                    drawScreen();
-                    return;
-                }
-                
-                // Type the password
-                Serial.println("Typing password via USB HID.");
-                Keyboard.print(decrypted_password);
-                
-                // Securely wipe sensitive data
-                Serial.println("Wiping sensitive data from memory.");
-                secureWipeBuffer(aes_key, sizeof(aes_key));
-                decrypted_password = "";
-                
-                pin_buffer = "";
+                currentState = STATE_PASSWORD_SELECTION;
+                pin_attempts = 0; // pin_buffer is intentionally kept for decryption
                 error_message = "";
-                Serial.println("Returning to PIN entry screen.");
+                Serial.println("Moving to password selection screen.");
                 drawScreen();
                 
             } else {
@@ -1444,7 +1468,6 @@ void handleOKButton() {
                 generateSalt(salt);
                 Serial.println("Salt generated. Moving to password setup.");
                 
-                pin_buffer = "";
                 error_message = "";
                 currentState = STATE_SETUP_PASSWORD;
             } else {
@@ -1452,12 +1475,53 @@ void handleOKButton() {
                 // PIN mismatch
                 error_message = "PINs do not match";
                 pin_buffer = "";
-                new_pin_buffer = "";
                 currentState = STATE_SETUP_PIN_NEW;
             }
             drawScreen();
             break;
     }
+}
+
+void typePassword(int index) {
+    String key_name = "enc_pass_" + String(index);
+    String encrypted_password = preferences.getString(key_name.c_str(), "");
+
+    if (encrypted_password.length() == 0) {
+        Serial.println("No password in slot " + String(index));
+        // Optionally provide feedback on screen
+        return;
+    }
+
+    if (!deriveKey(pin_buffer, salt, aes_key)) {
+        error_message = "Key derivation failed";
+        currentState = STATE_ERROR;
+        Serial.println("Error: Key derivation failed.");
+        drawScreen();
+        return;
+    }
+
+    String decrypted_password;
+    if (!decryptPassword(encrypted_password, aes_key, decrypted_password)) {
+        error_message = "Decryption failed";
+        currentState = STATE_ERROR;
+        Serial.println("Error: Password decryption failed.");
+        drawScreen();
+        return;
+    }
+
+    // Type the password
+    Serial.println("Typing password " + String(index) + " via USB HID.");
+    Keyboard.print(decrypted_password);
+
+    // Securely wipe sensitive data from RAM
+    secureWipeBuffer(aes_key, sizeof(aes_key));
+    decrypted_password = "";
+
+    // Return to PIN entry screen after typing for security
+    Serial.println("Password typed. Returning to PIN entry screen.");
+    pin_buffer = ""; // Securely clear the PIN from memory
+    currentState = STATE_PIN_ENTRY;
+    drawScreen();
 }
 
 void handlePasswordOK() {
@@ -1468,7 +1532,7 @@ void handlePasswordOK() {
         drawScreen();
         return;
     }
-    
+
     // Derive key and encrypt password
     Serial.println("handlePasswordOK: Deriving key from new PIN...");
     if (!deriveKey(new_pin_buffer, salt, aes_key)) {
@@ -1491,9 +1555,10 @@ void handlePasswordOK() {
     }
     Serial.println("handlePasswordOK: Encryption successful.");
     
-    // Save all data
+    // Save this password
     Serial.println("handlePasswordOK: Saving encrypted password to preferences...");
-    if (!preferences.putString("enc_pass", encrypted_password)) {
+    String key_name = "enc_pass_" + String(setup_password_index);
+    if (!preferences.putString(key_name.c_str(), encrypted_password)) {
         Serial.println("handlePasswordOK: FATAL - Failed to save encrypted password.");
         error_message = "Storage failed";
         currentState = STATE_ERROR;
@@ -1501,27 +1566,44 @@ void handlePasswordOK() {
         return;
     }
     
-    Serial.println("handlePasswordOK: Saving PIN hash and salt...");
-    if (!saveStoredData()) {
-        Serial.println("handlePasswordOK: FATAL - Failed to save PIN hash and salt.");
-        error_message = "Storage failed";
-        currentState = STATE_ERROR;
-        drawScreen();
-        return;
+    // If this is the first password, we also need to save the PIN hash and salt.
+    if (setup_password_index == 1) {
+        Serial.println("handlePasswordOK: Saving PIN hash and salt for the first time...");
+        if (!saveStoredData()) {
+            Serial.println("handlePasswordOK: FATAL - Failed to save PIN hash and salt.");
+            error_message = "Storage failed";
+            currentState = STATE_ERROR;
+            drawScreen();
+            return;
+        }
     }
-    
+
+    // Move to the next password or finish
+    setup_password_index++;
+    if (setup_password_index > MAX_PASSWORDS) {
+        finishSetup();
+    } else {
+        // Ready for next password
+        password_buffer = "";
+        drawScreen();
+    }
+}
+
+void finishSetup() {
+    Serial.println("finishSetup: Finalizing setup...");
+
     Serial.println("handlePasswordOK: Setting configuration flags...");
     preferences.putBool("is_configured", true);
     preferences.putBool("needs_setup", false);
     
     // Securely wipe sensitive data
-    Serial.println("handlePasswordOK: Wiping sensitive data from memory...");
+    Serial.println("finishSetup: Wiping sensitive data from memory...");
     secureWipeBuffer(aes_key, sizeof(aes_key));
     password_buffer = "";
     new_pin_buffer = "";
     error_message = "";
     
-    // Restart device
+    // Restart device to enter normal operation mode
     Serial.println("handlePasswordOK: Setup complete. Restarting device.");
     ESP.restart();
 }
@@ -1547,7 +1629,10 @@ void processTouch() {
                 wiping = true;
                 Serial.println("handleWipeConfirmation called");
                 handleWipeConfirmation();
-            } else if (currentState != STATE_LOCKED_OUT && currentState != STATE_ERROR) {
+            } else if (currentState == STATE_PASSWORD_SELECTION) {
+                Serial.println("handlePasswordSelectionInput called");
+                handlePasswordSelectionInput();
+            } else if (currentState == STATE_PIN_ENTRY || currentState == STATE_SETUP_PIN_NEW || currentState == STATE_SETUP_PIN_CONFIRM) {
                 Serial.println("handleNumpadInput called");
                 handleNumpadInput();
             } else if (currentState == STATE_LOCKED_OUT) {
@@ -1621,7 +1706,11 @@ void loop() {
             password_buffer = Serial.readStringUntil('\n');
             password_buffer.trim(); // Remove any leading/trailing whitespace
             Serial.println("Password received via Serial: " + password_buffer);
-            if (password_buffer.length() > 0) {
+            if (password_buffer.length() == 0) {
+                // Empty password means user is done with setup
+                finishSetup();
+            } else {
+                // Process the entered password
                 handlePasswordOK();
             }
         }
