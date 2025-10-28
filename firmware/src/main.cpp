@@ -682,7 +682,7 @@ void hw_clear_screen_black()
 
 // Security constants
 #define MAX_PIN_LENGTH      10
-#define MAX_PASSWORD_LENGTH 100
+#define MAX_PASSWORD_LENGTH 1024
 #define PBKDF2_ITERATIONS   5000  // Reduced for ESP32 performance
 #define AES_KEY_SIZE        32
 #define SALT_SIZE           16
@@ -705,25 +705,6 @@ TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite sprite = TFT_eSprite(&tft);
 USBHIDKeyboard Keyboard;
 Preferences preferences;
-
-// QWERTY Keyboard layout (3 rows)
-const char* qwerty_rows[3] = {
-    "QWERTYUIOP",
-    "ASDFGHJKL",
-    "ZXCVBNM"
-};
-
-const char* symbol_rows[4] = {
-    "1234567890",
-    "!@#$%^&*()",
-    "-_=+\\|[]{}",
-    "" // Placeholder for control buttons ";:'\",<.>/?",
-};
-
-const int qwerty_key_width = 58;
-const int qwerty_key_height = 30;
-const int qwerty_key_gap = 4;
-const int qwerty_ystart = 45;
 
 // Numpad layout
 const int xpos[] = {4, 92, 180};
@@ -1180,75 +1161,13 @@ void drawNumpadScreen(const String& title, bool show_error = false) {
     
 }
 
-void drawQWERTYKeyboard(const String& title, bool show_error = false) {
-    const char** current_rows = (qwerty_page == 0) ? qwerty_rows : symbol_rows;
-    int num_rows = (qwerty_page == 0) ? 3 : 4;
-
+void drawSerialPasswordEntryScreen() {
     sprite.fillSprite(COLOR_BG);
     sprite.setTextColor(TFT_SILVER, COLOR_BG);
-    sprite.setTextSize(2);
-    sprite.drawCentreString(title, TFT_WIDTH / 2, 2, 1);
-    
-    // Draw password display
-    sprite.drawRect(4, 20, TFT_WIDTH - 8, 22, TFT_WHITE);
-    sprite.setTextSize(2);
-    sprite.setTextColor(TFT_BLACK, TFT_WHITE);
-    // Show password in clear text during setup
-    sprite.drawString(password_buffer, 10, 24);
-    sprite.setTextColor(TFT_SILVER, COLOR_BG);
-    
-    // Draw error message if any
-    if (show_error && error_message.length() > 0) {
-        sprite.setTextColor(COLOR_ERROR, COLOR_BG);
-        sprite.setTextSize(2);
-        sprite.drawCentreString(error_message, TFT_WIDTH / 2, TFT_HEIGHT - 18, 1);
-        sprite.setTextColor(TFT_SILVER, COLOR_BG);
-    }
-
-    // Draw QWERTY keyboard
-    sprite.setTextSize(2);
-    for (int row = 0; row < num_rows; row++) {
-        int key_count = strlen(current_rows[row]);
-        if (key_count == 0) continue;
-
-        int row_width = key_count * qwerty_key_width + (key_count - 1) * qwerty_key_gap;
-        int start_x = (TFT_WIDTH - row_width) / 2;
-
-        for (int col = 0; col < key_count; col++) {
-            int x_pos = start_x + col * (qwerty_key_width + qwerty_key_gap);
-            int y_pos = qwerty_ystart + row * (qwerty_key_height + qwerty_key_gap);
-            
-            sprite.fillRoundRect(x_pos, y_pos, qwerty_key_width, qwerty_key_height, 5, COLOR_BTN1);
-            sprite.setTextColor(COLOR_TEXT, COLOR_BTN1);
-            
-            char key[2] = {current_rows[row][col], '\0'};
-            sprite.drawCentreString(key, x_pos + qwerty_key_width/2, y_pos , 2);
-        }
-    }
-    
-    // Draw control buttons
-    int control_y = qwerty_ystart + 3 * (qwerty_key_height + qwerty_key_gap);
-
-    // Page switch button
-    sprite.fillRoundRect(4, control_y, 100, qwerty_key_height, 8, COLOR_BTN2);
-    sprite.setTextColor(COLOR_ACCENT, COLOR_BTN2);
-    sprite.drawCentreString((qwerty_page == 0) ? "?123" : "ABC", 54, control_y , 2);
-
-    // Backspace button
-    sprite.fillRoundRect(112, control_y, 100, qwerty_key_height, 8, COLOR_BTN2);
-    sprite.setTextColor(COLOR_ACCENT, COLOR_BTN2);
-    sprite.drawCentreString("<-", 162, control_y , 2);
-
-    // Clear button
-    sprite.fillRoundRect(TFT_WIDTH - 216, control_y, 100, qwerty_key_height, 8, COLOR_BTN2);
-    sprite.setTextColor(COLOR_ACCENT, COLOR_BTN2);
-    sprite.drawCentreString("CLR", TFT_WIDTH - 166, control_y , 2);
-
-    // OK button
-    sprite.fillRoundRect(TFT_WIDTH - 108, control_y, 104, qwerty_key_height, 8, COLOR_SUCCESS);
-    sprite.setTextColor(TFT_WHITE, TFT_GREEN);
-    sprite.drawCentreString("OK", TFT_WIDTH - 56, control_y , 2);
-    
+    sprite.drawCentreString("Set Password", TFT_WIDTH / 2, 30, 4);
+    sprite.drawCentreString("Enter password in Serial Monitor", TFT_WIDTH / 2, 80, 2);
+    sprite.drawCentreString("and press Enter.", TFT_WIDTH / 2, 110, 2);
+    sprite.drawCentreString("Waiting for input...", TFT_WIDTH / 2, 150, 2);
     lcd_PushColors_rotated_90(0, 0, TFT_WIDTH, TFT_HEIGHT, (uint16_t*)sprite.getPointer());
 }
 
@@ -1314,7 +1233,7 @@ void drawScreen() {
             break;
         case STATE_SETUP_PASSWORD:
             Serial.println("Drawing: STATE_SETUP_PASSWORD");
-            drawQWERTYKeyboard("Enter Password to Store");
+            drawSerialPasswordEntryScreen();
             break;
         case STATE_PIN_ENTRY:
             Serial.println("Drawing: STATE_PIN_ENTRY");
@@ -1394,92 +1313,6 @@ void handleNumpadInput() {
             tx >= 350 && tx <= 470 && ty >= 111 && ty <= 146) {
             currentState = STATE_WIPE_CONFIRM;
             wipe_start_time = millis();
-            drawScreen();
-        }
-    }
-}
-
-void handleQWERTYInput() {
-    Serial.println("handleQWERTYInput: Reading touch data...");
-    uint8_t buff[8] = {0};
-    Wire.beginTransmission(TOUCH_I2C_ADDR);
-    if (Wire.write(read_touchpad_cmd, 8) != 8) {
-        return;
-    }
-    if (Wire.endTransmission() != 0) {
-        return;
-    }
-    
-    uint8_t received = Wire.requestFrom(TOUCH_I2C_ADDR, 8);
-    if (received == 8) {
-        Wire.readBytes(buff, 8);
-    } else {
-        return;
-    }
-
-    int pointX = AXS_GET_POINT_X(buff, 0);
-    int pointY = AXS_GET_POINT_Y(buff, 0);
-
-    if (pointX > 0 && pointY > 0) {
-        Serial.println("handleQWERTYInput: Touch detected at raw X=" + String(pointX) + ", Y=" + String(pointY));
-        int tx = map(pointX, 627, 10, 0, TFT_WIDTH);
-        int ty = map(pointY, 180, 0, 0, TFT_HEIGHT);
-        Serial.println("handleQWERTYInput: Mapped to tx=" + String(tx) + ", ty=" + String(ty));
-        
-        // Check QWERTY keyboard
-        const char** current_rows = (qwerty_page == 0) ? qwerty_rows : symbol_rows;
-        int num_rows = (qwerty_page == 0) ? 3 : 4;
-        for (int row = 0; row < num_rows; row++) {
-            int key_count = strlen(current_rows[row]);
-            if (key_count == 0) continue;
-
-            int row_width = key_count * qwerty_key_width + (key_count - 1) * qwerty_key_gap;
-            int start_x = (TFT_WIDTH - row_width) / 2;
-
-            for (int col = 0; col < key_count; col++) {
-                int x_pos = start_x + col * (qwerty_key_width + qwerty_key_gap);
-                int y_pos = qwerty_ystart + row * (qwerty_key_height + qwerty_key_gap);
-                
-                if (tx >= x_pos && tx <= x_pos + qwerty_key_width &&
-                    ty >= y_pos && ty <= y_pos + qwerty_key_height) {
-                    
-                    Serial.println("handleQWERTYInput: Key '" + String(current_rows[row][col]) + "' pressed.");
-                    if (password_buffer.length() < MAX_PASSWORD_LENGTH) {
-                        password_buffer += current_rows[row][col];
-                        Serial.println("handleQWERTYInput: Password buffer is now: " + password_buffer);
-                    }
-                    drawScreen();
-                    return;
-                }
-            }
-        }
-        
-        // Check control buttons
-        int control_y = qwerty_ystart + 3 * (qwerty_key_height + qwerty_key_gap);
-        if (ty >= control_y && ty <= control_y + qwerty_key_height) {
-            Serial.println("handleQWERTYInput: Touch is in control button Y-range.");
-            if (tx >= 4 && tx <= 104) { // Page switch
-                Serial.println("handleQWERTYInput: Page switch button pressed.");
-                qwerty_page = 1 - qwerty_page; // Toggle between 0 and 1
-            } else if (tx >= 112 && tx <= 212) { // Backspace
-                Serial.println("handleQWERTYInput: Backspace button pressed.");
-                if (password_buffer.length() > 0) {
-                    password_buffer.remove(password_buffer.length() - 1);
-                }
-            } else if (tx >= TFT_WIDTH - 216 && tx <= TFT_WIDTH - 116) { // Clear
-                Serial.println("handleQWERTYInput: Clear button pressed.");
-                password_buffer = "";
-            } else if (tx >= TFT_WIDTH - 108 && tx <= TFT_WIDTH - 4) { // OK
-                Serial.println("handleQWERTYInput: OK button pressed.");
-                if (password_buffer.length() > 0) {
-                    Serial.println("handleQWERTYInput: Calling handlePasswordOK().");
-                    handlePasswordOK();
-                } else {
-                    Serial.println("handleQWERTYInput: Password empty, setting error message.");
-                    error_message = "Password cannot be empty";
-                }
-            }
-            Serial.println("handleQWERTYInput: Redrawing screen after control button press.");
             drawScreen();
         }
     }
@@ -1714,9 +1547,6 @@ void processTouch() {
                 wiping = true;
                 Serial.println("handleWipeConfirmation called");
                 handleWipeConfirmation();
-            } else if (currentState == STATE_SETUP_PASSWORD) {
-                Serial.println("handleQWERTYInput called");
-                handleQWERTYInput();
             } else if (currentState != STATE_LOCKED_OUT && currentState != STATE_ERROR) {
                 Serial.println("handleNumpadInput called");
                 handleNumpadInput();
@@ -1785,6 +1615,17 @@ void setup() {
 
 void loop() {
     processTouch();
+
+    if (currentState == STATE_SETUP_PASSWORD) {
+        if (Serial.available() > 0) {
+            password_buffer = Serial.readStringUntil('\n');
+            password_buffer.trim(); // Remove any leading/trailing whitespace
+            Serial.println("Password received via Serial: " + password_buffer);
+            if (password_buffer.length() > 0) {
+                handlePasswordOK();
+            }
+        }
+    }
     
     // Handle wipe confirmation progress
     if (currentState == STATE_WIPE_CONFIRM && wiping) {
