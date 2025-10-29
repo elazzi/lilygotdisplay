@@ -13,19 +13,6 @@
 #define SPI_FREQUENCY         32000000 // corruption occured at 40000000 so 32000000 is probably a safe upper limit
 #define TFT_SPI_MODE          SPI_MODE0
 #define TFT_SPI_HOST          SPI2_HOST
-
-#define WIFI_SSID             "xxxx"
-#define WIFI_PASSWORD         "xxxx"
-
-#define WIFI_CONNECT_WAIT_MAX (30 * 1000)
-
-#define NTP_SERVER1           "pool.ntp.org"
-#define NTP_SERVER2           "time.nist.gov"
-#define GMT_OFFSET_SEC        0
-#define DAY_LIGHT_OFFSET_SEC  0
-#define GET_TIMEZONE_API      "https://ipapi.co/timezone/"
-
-
 #define SEND_BUF_SIZE         (28800/2) //
 #define TFT_QSPI_CS           12
 #define TFT_QSPI_SCK          17

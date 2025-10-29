@@ -82,11 +82,7 @@ The firmware is the code that runs on your LilyGO T-Display S3 Long. We will use
 
 3.  **Upload the Firmware:**
     *   Connect your LilyGO T-Display S3 Long to your PC with a USB-C cable.
-    *   The device needs to be in "bootloader" mode to receive the new firmware. To do this:
-        a. Press and **hold** the "BOOT" button on the device.
-        b. While still holding it, press and release the "RST" (reset) button.
-        c. You can now release the "BOOT" button.
-    *   In VS Code, find the PlatformIO toolbar at the bottom of the screen. Click the **Upload** button (it looks like a right-facing arrow `→`).
+    *   In VS Code, find the PlatformIO toolbar at the bottom of the screen. Click the **Upload** button (it looks like a right-facing arrow `→`). PlatformIO will automatically put the device into bootloader mode.
     *   PlatformIO will now compile the code and upload it to your device. You can see the progress in the terminal window. If it's successful, the device will restart.
 
 4.  **Initial Setup on Device:**
